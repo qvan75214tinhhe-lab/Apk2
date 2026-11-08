@@ -1,0 +1,51 @@
+name: Build APK
+on:
+  push:
+  workflow_dispatch:
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - name: Chấp nhận license Android SDK
+        run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
+      - name: Cài NDK 22.1
+        run: '"$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "ndk;22.1.7171670" || true'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: 8.13
+      - name: Chuẩn bị source
+        run: |
+          # Nếu repo chứa file JL-Mod-Z.zip thì giải nén, còn không thì source nằm ngay ở thư mục gốc
+          if [ -f JL-Mod-Z.zip ]; then
+            unzip -q JL-Mod-Z.zip -d src
+            echo "SRC=src/JL-Mod-Z" >> "$GITHUB_ENV"
+          else
+            echo "SRC=." >> "$GITHUB_ENV"
+          fi
+      - name: Tải TinySoundFont (submodule bị rỗng khi upload tay)
+        run: |
+          d="$SRC/app/src/main/cpp/mmapi_tsf/TinySoundFont"
+          if [ ! -f "$d/tsf.h" ]; then
+            rm -rf "$d"
+            git clone --depth 1 https://github.com/schellingb/TinySoundFont.git "$d"
+          fi
+      - name: Tạo key ký APK
+        run: |
+          cd "$SRC"
+          keytool -genkeypair -keystore keystore.jks -alias modkey -keyalg RSA -keysize 2048 \
+            -validity 10000 -storepass modpass123 -keypass modpass123 -dname "CN=JL-Mod-Z"
+          printf 'keyAlias=modkey\nkeyPassword=modpass123\nstoreFile=keystore.jks\nstorePassword=modpass123\n' > keystore.properties
+      - name: Build
+        run: |
+          cd "$SRC"
+          gradle assembleEmulatorDebug --no-daemon
+      - uses: actions/upload-artifact@v4
+        with:
+          name: JL-Mod-Z-debug-apk
+          path: ${{ env.SRC }}/app/build/outputs/apk/emulator/debug/*.apk
+          
